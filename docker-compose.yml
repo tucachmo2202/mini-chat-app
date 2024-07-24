@@ -9,7 +9,7 @@ services:
       - "6378:6379"
     volumes:
       - "${FOLDER_STORAGE}/cache:/data"
-    command: "redis-server --save 20 1 --loglevel warning"
+    command: "redis-server --save 20 1 --loglevel warning --requirepass password"
 
   backend:
     build: 
@@ -22,4 +22,4 @@ services:
     depends_on:
       - redis
     volumes:
-      - /media/manhas/Knowledge9/ubuntu/2024-mini-chat-app/app:/app
+      - /media/manhas/Knowledge9/ubuntu/2024-mini-chat-app/mini-chat-app/app:/app
