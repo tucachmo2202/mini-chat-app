@@ -7,12 +7,12 @@ from fastapi import (
     HTTPException,
     WebSocketDisconnect,
     status,
+    Request,
 )
 from fastapi.security import OAuth2PasswordRequestForm
 import uuid
 from redis import Redis
 from broadcaster import Broadcast
-from fastapi.concurrency import run_until_first_complete
 from redis_utils import get_cache_client
 from models import User, Message, UserCreate
 from auth import hash_password, authenticate_user, get_current_user
@@ -66,15 +66,14 @@ async def websocket_endpoint(
     redis: Redis = Depends(get_cache_client),
 ):
     await websocket.accept()
-    # user_infor: User = await get_current_user(token)
-    # if user_infor.username != room_id:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_404_NOT_FOUND,
-    #         detail="Not allow to send message to this room",
-    #     )
-    print("accepted")
+    user_infor: User = await get_current_user(token)
+    if user_infor is None or user_infor.username != room_id:
+        await websocket.close(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="user not found",
+        )
+        return {"username": user_infor, "room_id": room_id}
     async with broadcast.subscribe(channel=f"chat_{room_id}") as subscriber:
-        print("bat dau broadcaster  ")
         try:
             while True:
                 data = await websocket.receive_text()
@@ -91,7 +90,6 @@ async def websocket_endpoint(
                         ).timestamp()
                     },
                 )
-                print("add xong message")
                 await broadcast.publish(
                     channel=f"chat_{room_id}", message=json.dumps(message.model_dump())
                 )
@@ -99,22 +97,40 @@ async def websocket_endpoint(
                 await websocket.send_text(event.message)
         except WebSocketDisconnect:
             pass
+        finally:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
 
 
 @app.get("/messages/{room_id}")
 async def get_messages(
     room_id: str,
+    request: Request,
     page: int = 0,
     page_size: int = 10,
-    user_infor: User = Depends(get_current_user),
     redis: Redis = Depends(get_cache_client),
 ):
-    if not user_infor.username != room_id:
+    token = request.headers.get("Authorization")
+    if token is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token is required"
+        )
+    if "Bearer" not in token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token type is not valid"
+        )
+    access_token = token.split(" ")[-1]
+    if not access_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token is required.",
+        )
+    user_infor: User = await get_current_user(access_token)
+    if user_infor is None or user_infor.username != room_id:
+        raise HTTPException(
+            status_code=status.HTTP_406_NOT_ACCEPTABLE,
             detail="Not allow to read message to this room",
         )
     start_index = page * page_size
     end_index = start_index + page_size - 1
-    messages = redis.zrange(f"messages:{room_id}", start_index, end_index)
+    messages = redis.zrange(f"messages:{room_id}", start_index, end_index, desc=True)
     return [json.loads(msg) for msg in messages]

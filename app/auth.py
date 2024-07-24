@@ -60,18 +60,11 @@ def decode_token(
 async def get_current_user(token: str):
     user_infor = decode_token(token)
     redis = get_cache_client()
+    print("user_infor", user_infor)
     if "username" not in user_infor:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    user_data = redis.hgetall(f"user:{token}")
-    print("user_data:", user_data)
+        return None
+    user_data = redis.hgetall(f"user:{user_infor['username']}")
+    print("user_data", user_data)
     if not user_data:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return User(**json.loads(user_data))
+        return None
+    return User(**user_data)
