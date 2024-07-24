@@ -1,8 +1,14 @@
+import json
+from typing import Union, Any, Dict
+import jwt
 import hashlib
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from redis import Redis
 from redis_utils import get_cache_client
+from constants import DEFAULT_SECRET_KEY, DEFAULT_ALGORITHM
+from models import User
+
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 # redis = Redis(host="redis://redis", port=6379, db=0)
@@ -14,13 +20,52 @@ def hash_password(password: str) -> str:
 
 def authenticate_user(redis: Redis, username: str, password: str):
     user_data = redis.hgetall(f"user:{username}")
+    print("user_data", user_data)
     if not user_data or user_data.get("password") != hash_password(password):
-        return False
-    return user_data
+        return None
+    else:
+        user_infor = {
+            "username": user_data["username"],
+            "email": user_data["email"],
+            "name": user_data["name"],
+        }
+        token = encode_token(subject=user_infor)
+        return token
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+def encode_token(
+    subject: Union[str, Any],
+    secret_key: str = DEFAULT_SECRET_KEY,
+    algorithm: str = DEFAULT_ALGORITHM,
+) -> str:
+    payload = subject
+    encode_token_jwt = jwt.encode(payload, key=secret_key, algorithm=algorithm)
+    return encode_token_jwt
+
+
+def decode_token(
+    encode_token: str,
+    secret_key: str = DEFAULT_SECRET_KEY,
+    algorithms: str = DEFAULT_ALGORITHM,
+) -> Dict:
+    try:
+        decode_token = jwt.decode(encode_token, key=secret_key, algorithms=algorithms)
+    except jwt.exceptions.DecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+        )
+    return decode_token
+
+
+async def get_current_user(token: str):
+    user_infor = decode_token(token)
     redis = get_cache_client()
+    if "username" not in user_infor:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     user_data = redis.hgetall(f"user:{token}")
     if not user_data:
         raise HTTPException(
@@ -28,4 +73,4 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
             detail="Invalid credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return user_data
+    return User(**json.loads(user_data))

@@ -12,9 +12,9 @@ from fastapi.security import OAuth2PasswordRequestForm
 import uuid
 from redis import Redis
 from broadcaster import Broadcast
+from fastapi.concurrency import run_until_first_complete
 from redis_utils import get_cache_client
-from models import User, Message
-from schemas import UserCreate, MessageCreate
+from models import User, Message, UserCreate
 from auth import hash_password, authenticate_user, get_current_user
 
 
@@ -32,39 +32,46 @@ async def register(user: UserCreate, redis: Redis = Depends(get_cache_client)):
         password=hash_password(user.password),
         email=user.email,
         name=user.name,
+        created_at=datetime.now(timezone.utc).isoformat(),
     )
-    redis.hmset(f"user:{user.username}", user_data.model_dump())
+    if redis.exists(f"user:{user.username}"):
+        raise HTTPException(
+            status_code=status.HTTP_406_NOT_ACCEPTABLE, detail="username already in use"
+        )
+    else:
+        redis.hmset(f"user:{user.username}", user_data.model_dump())
     return {"msg": "User registered successfully"}
 
 
-@app.post("/token")
+@app.post("/login")
 async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     redis: Redis = Depends(get_cache_client),
 ):
-    user = authenticate_user(redis, form_data.username, form_data.password)
-    if not user:
+    token = authenticate_user(redis, form_data.username, form_data.password)
+    if token is None:
         raise HTTPException(
             status_code=400,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return {"access_token": form_data.username, "token_type": "bearer"}
+    return {"access_token": token, "token_type": "bearer"}
 
 
 @app.websocket("/ws/{room_id}")
 async def websocket_endpoint(
     websocket: WebSocket,
     room_id: str,
-    token: str = Depends(get_current_user),
+    token: str,
     redis: Redis = Depends(get_cache_client),
 ):
-    if token != room_id:
+    await websocket.accept()
+    user_infor: User = await get_current_user(token)
+    if user_infor.username != room_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Not allow to send message to this room",
         )
-    await websocket.accept()
     async with broadcast.subscribe(channel=f"chat_{room_id}") as subscriber:
         try:
             while True:
@@ -87,38 +94,19 @@ async def websocket_endpoint(
             pass
 
 
-# @app.post("/messages")
-# async def send_message(
-#     message: MessageCreate,
-#     user: dict = Depends(get_current_user),
-#     redis: Redis = Depends(get_cache_client),
-# ):
-#     message_id = str(uuid.uuid4())
-#     send_time = datetime.now(timezone.utc).timestamp()
-#     message_data = Message(
-#         id=message_id,
-#         room_id=message.room_id,
-#         text=message.text,
-#         url=message.url,
-#         send_time=send_time,
-#     )
-#     redis.zadd(
-#         f"messages:{message.room_id}",
-#         {json.dumps(message_data.model_dump()): send_time},
-#     )
-#     await broadcast.publish(
-#         channel=message.room_id, message=json.dumps(message_data.model_dump())
-#     )
-#     return {"msg": "Message sent"}
-
-
 @app.get("/messages/{room_id}")
 async def get_messages(
     room_id: str,
     page: int = 0,
     page_size: int = 10,
+    user_infor: User = Depends(get_current_user),
     redis: Redis = Depends(get_cache_client),
 ):
+    if not user_infor.username != room_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not allow to read message to this room",
+        )
     start_index = page * page_size
     end_index = start_index + page_size - 1
     messages = redis.zrange(f"messages:{room_id}", start_index, end_index)

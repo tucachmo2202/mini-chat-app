@@ -5,3 +5,4 @@ redis
 broadcaster
 python-dotenv
 pydantic
+pyjwt
