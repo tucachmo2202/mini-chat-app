@@ -97,8 +97,6 @@ async def websocket_endpoint(
                 await websocket.send_text(event.message)
         except WebSocketDisconnect:
             pass
-        finally:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
 
 
 @app.get("/messages/{room_id}")
