@@ -1,0 +1,25 @@
+version: "3.7"
+
+services:
+
+  redis:
+    image: redis/redis-stack-server:latest
+    restart: always
+    ports:
+      - "6378:6379"
+    volumes:
+      - "${FOLDER_STORAGE}/cache:/data"
+    command: "redis-server --save 20 1 --loglevel warning"
+
+  backend:
+    build: 
+      context: app
+      dockerfile: Dockerfile
+    restart: always
+    command: bash -c "cd /app && sh run.sh"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+    volumes:
+      - /media/manhas/Knowledge9/ubuntu/2024-mini-chat-app/app:/app

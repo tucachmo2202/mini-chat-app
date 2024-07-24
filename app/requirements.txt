@@ -1,0 +1,7 @@
+fastapi 
+uvicorn 
+asyncio-redis
+redis
+broadcaster
+python-dotenv
+pydantic
