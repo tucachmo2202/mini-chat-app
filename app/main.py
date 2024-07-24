@@ -66,13 +66,15 @@ async def websocket_endpoint(
     redis: Redis = Depends(get_cache_client),
 ):
     await websocket.accept()
-    user_infor: User = await get_current_user(token)
-    if user_infor.username != room_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Not allow to send message to this room",
-        )
+    # user_infor: User = await get_current_user(token)
+    # if user_infor.username != room_id:
+    #     raise HTTPException(
+    #         status_code=status.HTTP_404_NOT_FOUND,
+    #         detail="Not allow to send message to this room",
+    #     )
+    print("accepted")
     async with broadcast.subscribe(channel=f"chat_{room_id}") as subscriber:
+        print("bat dau broadcaster  ")
         try:
             while True:
                 data = await websocket.receive_text()
@@ -83,8 +85,13 @@ async def websocket_endpoint(
                 )
                 redis.zadd(
                     f"messages:{room_id}",
-                    {json.dumps(message.model_dump()): message.send_time.timestamp()},
+                    {
+                        json.dumps(message.model_dump()): datetime.fromisoformat(
+                            message.send_time
+                        ).timestamp()
+                    },
                 )
+                print("add xong message")
                 await broadcast.publish(
                     channel=f"chat_{room_id}", message=json.dumps(message.model_dump())
                 )

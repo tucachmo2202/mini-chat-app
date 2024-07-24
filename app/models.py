@@ -14,8 +14,7 @@ class User(UserCreate):
 
 
 class Message(BaseModel):
-    id: str
-    user_id: str
+    room_id: str
     text: Optional[str] = None
     url: Optional[str] = None
     send_time: str

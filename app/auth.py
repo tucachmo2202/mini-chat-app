@@ -67,6 +67,7 @@ async def get_current_user(token: str):
             headers={"WWW-Authenticate": "Bearer"},
         )
     user_data = redis.hgetall(f"user:{token}")
+    print("user_data:", user_data)
     if not user_data:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
