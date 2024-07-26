@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timezone
+import uuid
 from fastapi import (
     FastAPI,
     Depends,
@@ -9,13 +10,12 @@ from fastapi import (
     status,
 )
 from fastapi.security import OAuth2PasswordRequestForm
-import uuid
 from redis import Redis
 from broadcaster import Broadcast
 from typing import Dict, List
 from src.utils import check_valid_time
 from src.redis_utils import get_cache_client
-from src.enums import MessageInfo, MessageType, ResponseMessageType
+from src.enums import MessageType, ResponseMessageType
 from src.models import User, Message, UserCreate, ResponseMessage
 from src.auth import hash_password, authenticate_user, get_current_user, verify_user
 
