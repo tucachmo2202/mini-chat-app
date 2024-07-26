@@ -138,13 +138,13 @@ async def websocket_endpoint(
                     message="Thanks for send me a message",
                 )
 
+                time_utc = datetime.fromisoformat(
+                    message_infor["send_time"]
+                ).astimezone(timezone.utc)
+
                 redis.zadd(
                     f"messages:{room_id}",
-                    {
-                        json.dumps(message.model_dump()): datetime.fromisoformat(
-                            message_infor["send_time"]
-                        ).timestamp()
-                    },
+                    {json.dumps(message.model_dump()): time_utc.timestamp()},
                 )
                 await broadcast.publish(
                     channel=f"chat_{room_id}",
@@ -165,7 +165,7 @@ async def update_heartbeat(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not allow to call heartbeat",
         )
-    await redis.hset(
+    redis.hset(
         name=f"user:{user_infor.username}",
         key="last_online",
         value=datetime.now(timezone.utc).isoformat(),
