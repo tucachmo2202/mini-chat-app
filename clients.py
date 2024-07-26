@@ -7,12 +7,15 @@ import random
 from datetime import datetime, timedelta, timezone
 
 
+NUMBER_CLIENTS = 100
+
+
 async def send_messages(uri, client_id, token):
     try:
         async with websockets.connect(
             uri + str(client_id) + f"?token={token}"
         ) as websocket:
-            end_time = datetime.now() + timedelta(minutes=1)
+            end_time = datetime.now() + timedelta(minutes=5)
             while datetime.now() < end_time:
                 send_time = datetime.now(timezone.utc).isoformat()
                 message = {
@@ -27,13 +30,12 @@ async def send_messages(uri, client_id, token):
                 except websockets.exceptions.ConnectionClosedError as e:
                     print(f"ConnectionClosedError: {e}")
                     break
-                await asyncio.sleep(random.uniform(0.1, 1))
+                await asyncio.sleep(random.uniform(0.1, 60))
     except Exception as error:
         print("error when process websocket connection", error)
 
 
-def create_clients_token(user_name="lemanh"):
-    num_clients = 100
+def create_clients_token(user_name="lemanh", num_clients=NUMBER_CLIENTS):
     tokens = []
     for i in range(num_clients):
         # register client
@@ -56,7 +58,6 @@ def create_clients_token(user_name="lemanh"):
         url_login = "http://localhost:8080/login"
         payload = {"username": user_name + str(i), "password": "pass"}
         response = requests.request("POST", url_login, headers={}, data=payload)
-        print(response.json())
         tokens.append(response.json()["access_token"])
     return tokens
 
