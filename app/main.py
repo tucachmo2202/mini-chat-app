@@ -13,7 +13,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from redis import Redis
 from broadcaster import Broadcast
 from typing import Dict, List
-from src.utils import check_valid_time
+from src.utils import check_valid_time, is_online_recently
 from src.redis_utils import get_cache_client
 from src.enums import MessageType, ResponseMessageType
 from src.models import User, Message, UserCreate, ResponseMessage
@@ -80,15 +80,13 @@ async def websocket_endpoint(
         try:
             while True:
                 data = await websocket.receive_text()
+                redis.hset(
+                    name=f"user:{user_infor.username}",
+                    key="last_online",
+                    value=datetime.now(timezone.utc).isoformat(),
+                )
                 message_infor = json.loads(data)
-                print(message_infor)
-                try:
-                    type_message = message_infor["type"]
-                except Exception as error:
-                    await websocket.close(
-                        code=status.WS_1008_POLICY_VIOLATION,
-                        reason=f"user not found type{type(message_infor)}",
-                    )
+                type_message = message_infor["type"]
                 send_time = message_infor["send_time"]
                 if type_message == "text":
                     additional_message_infor = MessageType.text.value
@@ -133,6 +131,12 @@ async def websocket_endpoint(
                     send_time=message_infor["send_time"],
                 )
 
+                # check client alive to close the connection
+                user_data = User(**redis.hgetall(f"user:{user_infor.username}"))
+                if not is_online_recently(user_data.last_online):
+                    await websocket.close(reason="client disconnect")
+                    return {}
+
                 reply_message = ResponseMessage(
                     type=ResponseMessageType.reply,
                     message="Thanks for send me a message",
@@ -165,6 +169,7 @@ async def update_heartbeat(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not allow to call heartbeat",
         )
+
     redis.hset(
         name=f"user:{user_infor.username}",
         key="last_online",
