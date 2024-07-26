@@ -10,11 +10,20 @@ class UserCreate(BaseModel):
 
 
 class User(UserCreate):
+    id: str
+    last_online: str
     created_at: str
 
 
 class Message(BaseModel):
+    id: str
     room_id: str
+    type: int = 0
     text: Optional[str] = None
     url: Optional[str] = None
     send_time: str
+
+
+class ResponseMessage(BaseModel):
+    type: str
+    message: str

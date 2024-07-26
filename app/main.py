@@ -7,15 +7,17 @@ from fastapi import (
     HTTPException,
     WebSocketDisconnect,
     status,
-    Request,
 )
 from fastapi.security import OAuth2PasswordRequestForm
 import uuid
 from redis import Redis
 from broadcaster import Broadcast
-from redis_utils import get_cache_client
-from models import User, Message, UserCreate
-from auth import hash_password, authenticate_user, get_current_user
+from typing import Dict, List
+from src.utils import check_valid_time
+from src.redis_utils import get_cache_client
+from src.enums import MessageInfo, MessageType, ResponseMessageType
+from src.models import User, Message, UserCreate, ResponseMessage
+from src.auth import hash_password, authenticate_user, get_current_user, verify_user
 
 
 # redis://user:password@url:port
@@ -33,6 +35,7 @@ async def register(user: UserCreate, redis: Redis = Depends(get_cache_client)):
         email=user.email,
         name=user.name,
         created_at=datetime.now(timezone.utc).isoformat(),
+        last_online=datetime.now(timezone.utc).isoformat(),
     )
     if redis.exists(f"user:{user.username}"):
         raise HTTPException(
@@ -77,21 +80,75 @@ async def websocket_endpoint(
         try:
             while True:
                 data = await websocket.receive_text()
+                message_infor = json.loads(data)
+                print(message_infor)
+                try:
+                    type_message = message_infor["type"]
+                except Exception as error:
+                    await websocket.close(
+                        code=status.WS_1008_POLICY_VIOLATION,
+                        reason=f"user not found type{type(message_infor)}",
+                    )
+                send_time = message_infor["send_time"]
+                if type_message == "text":
+                    additional_message_infor = MessageType.text.value
+                elif type_message == "voice":
+                    additional_message_infor = MessageType.voice.value
+                elif type_message == "video":
+                    additional_message_infor = MessageType.video.value
+                else:
+                    error_message = ResponseMessage(
+                        type=ResponseMessageType.error,
+                        message=f"You send messages type {type_message} is invalid",
+                    )
+                    await broadcast.publish(
+                        channel=f"chat_{room_id}",
+                        message=json.dumps(error_message.model_dump()),
+                    )
+                    event = await subscriber.get()
+                    await websocket.send_text(event.message)
+                    continue
+                if not check_valid_time(
+                    send_time,
+                    additional_message_infor.min_time,
+                    additional_message_infor.max_time,
+                ):
+                    error_message = ResponseMessage(
+                        type=ResponseMessageType.error,
+                        message=f"You can't send {type_message} messages in this time",
+                    )
+                    await broadcast.publish(
+                        channel=f"chat_{room_id}",
+                        message=json.dumps(error_message.model_dump()),
+                    )
+                    event = await subscriber.get()
+                    await websocket.send_text(event.message)
+                    continue
+
                 message = Message(
+                    id=str(uuid.uuid4()),
                     room_id=room_id,
-                    text=data,
-                    send_time=datetime.now(timezone.utc).isoformat(),
+                    text=message_infor["text"],
+                    type=additional_message_infor.type,
+                    send_time=message_infor["send_time"],
                 )
+
+                reply_message = ResponseMessage(
+                    type=ResponseMessageType.reply,
+                    message="Thanks for send me a message",
+                )
+
                 redis.zadd(
                     f"messages:{room_id}",
                     {
                         json.dumps(message.model_dump()): datetime.fromisoformat(
-                            message.send_time
+                            message_infor["send_time"]
                         ).timestamp()
                     },
                 )
                 await broadcast.publish(
-                    channel=f"chat_{room_id}", message=json.dumps(message.model_dump())
+                    channel=f"chat_{room_id}",
+                    message=json.dumps(reply_message.model_dump()),
                 )
                 event = await subscriber.get()
                 await websocket.send_text(event.message)
@@ -99,30 +156,31 @@ async def websocket_endpoint(
             pass
 
 
-@app.get("/messages/{room_id}")
-async def get_messages(
-    room_id: str,
-    request: Request,
-    page: int = 0,
-    page_size: int = 10,
-    redis: Redis = Depends(get_cache_client),
+@app.post("/heartbeat", response_model=Dict)
+async def update_heartbeat(
+    user_infor: User = Depends(verify_user), redis: Redis = Depends(get_cache_client)
 ):
-    token = request.headers.get("Authorization")
-    if token is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token is required"
-        )
-    if "Bearer" not in token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token type is not valid"
-        )
-    access_token = token.split(" ")[-1]
-    if not access_token:
+    if user_infor is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token is required.",
+            detail="Not allow to call heartbeat",
         )
-    user_infor: User = await get_current_user(access_token)
+    await redis.hset(
+        name=f"user:{user_infor.username}",
+        key="last_online",
+        value=datetime.now(timezone.utc).isoformat(),
+    )
+    return {}
+
+
+@app.get("/messages/{room_id}", response_model=List[Message])
+async def get_messages(
+    room_id: str,
+    page: int = 0,
+    page_size: int = 10,
+    user_infor: User = Depends(verify_user),
+    redis: Redis = Depends(get_cache_client),
+):
     if user_infor is None or user_infor.username != room_id:
         raise HTTPException(
             status_code=status.HTTP_406_NOT_ACCEPTABLE,
@@ -131,4 +189,4 @@ async def get_messages(
     start_index = page * page_size
     end_index = start_index + page_size - 1
     messages = redis.zrange(f"messages:{room_id}", start_index, end_index, desc=True)
-    return [json.loads(msg) for msg in messages]
+    return [Message(**json.loads(msg)) for msg in messages]

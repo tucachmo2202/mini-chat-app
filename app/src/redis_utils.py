@@ -2,9 +2,6 @@ import os
 import redis
 
 
-# redis_client = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
-
-
 def get_cache_client():
     host = os.getenv("REDIS_HOST", "redis")
     port = os.getenv("REDIS_PORT", "6379")

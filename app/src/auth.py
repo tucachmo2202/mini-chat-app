@@ -1,13 +1,12 @@
-import json
 from typing import Union, Any, Dict
 import jwt
 import hashlib
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from redis import Redis
-from redis_utils import get_cache_client
-from constants import DEFAULT_SECRET_KEY, DEFAULT_ALGORITHM
-from models import User
+from src.redis_utils import get_cache_client
+from src.constants import DEFAULT_SECRET_KEY, DEFAULT_ALGORITHM
+from src.models import User
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -25,12 +24,33 @@ def authenticate_user(redis: Redis, username: str, password: str):
         return None
     else:
         user_infor = {
+            "id": user_data["id"],
             "username": user_data["username"],
             "email": user_data["email"],
             "name": user_data["name"],
         }
         token = encode_token(subject=user_infor)
         return token
+
+
+async def verify_user(request: Request):
+    token = request.headers.get("Authorization")
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token is required"
+        )
+    if "Bearer" not in token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token type is not valid"
+        )
+    access_token = token.split(" ")[-1]
+    if not access_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token is required.",
+        )
+    user_infor: User = await get_current_user(access_token)
+    return user_infor
 
 
 def encode_token(
@@ -60,11 +80,9 @@ def decode_token(
 async def get_current_user(token: str):
     user_infor = decode_token(token)
     redis = get_cache_client()
-    print("user_infor", user_infor)
     if "username" not in user_infor:
         return None
     user_data = redis.hgetall(f"user:{user_infor['username']}")
-    print("user_data", user_data)
     if not user_data:
         return None
     return User(**user_data)

@@ -1,7 +1,6 @@
 import redis
 import json
-from datetime import datetime
-from .models import User, Message
+from src.models import User, Message
 
 r = redis.Redis(host="redis", port=6379, db=0)
 
