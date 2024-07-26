@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timezone
+import asyncio
 import uuid
 from fastapi import (
     FastAPI,
@@ -8,6 +9,7 @@ from fastapi import (
     HTTPException,
     WebSocketDisconnect,
     status,
+    WebSocketException,
 )
 from fastapi.security import OAuth2PasswordRequestForm
 from redis import Redis
@@ -18,9 +20,12 @@ from src.redis_utils import get_cache_client
 from src.enums import MessageType, ResponseMessageType
 from src.models import User, Message, UserCreate, ResponseMessage
 from src.auth import hash_password, authenticate_user, get_current_user, verify_user
+from src.constants import MAX_CLIENTS
 
 
 # redis://user:password@url:port
+websocket_list = []
+message_queue = asyncio.Queue(maxsize=500)
 broadcast = Broadcast("redis://:password@redis:6379")
 app = FastAPI(on_startup=[broadcast.connect], on_shutdown=[broadcast.disconnect])
 
@@ -68,13 +73,19 @@ async def websocket_endpoint(
     token: str,
     redis: Redis = Depends(get_cache_client),
 ):
+    if len(websocket_list) >= MAX_CLIENTS:
+        raise WebSocketException(
+            code=status.WS_1013_TRY_AGAIN_LATER, reason="Too many websockets"
+        )
     await websocket.accept()
+    websocket_list.append(websocket)
     user_infor: User = await get_current_user(token)
     if user_infor is None or user_infor.username != room_id:
         await websocket.close(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="user not found",
         )
+        websocket_list.remove(websocket)
         return {"username": user_infor, "room_id": room_id}
     async with broadcast.subscribe(channel=f"chat_{room_id}") as subscriber:
         try:
@@ -135,6 +146,7 @@ async def websocket_endpoint(
                 user_data = User(**redis.hgetall(f"user:{user_infor.username}"))
                 if not is_online_recently(user_data.last_online):
                     await websocket.close(reason="client disconnect")
+                    websocket_list.remove(websocket)
                     return {}
 
                 reply_message = ResponseMessage(
@@ -157,7 +169,7 @@ async def websocket_endpoint(
                 event = await subscriber.get()
                 await websocket.send_text(event.message)
         except WebSocketDisconnect:
-            pass
+            websocket_list.remove(websocket)
 
 
 @app.post("/heartbeat", response_model=Dict)

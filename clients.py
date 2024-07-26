@@ -4,35 +4,48 @@ import requests
 import asyncio
 import websockets
 import random
-from datetime import datetime, timedelta, timezone
+import pytz
+from datetime import datetime, timedelta
 
 
 NUMBER_CLIENTS = 100
+timezones = pytz.all_timezones
+
+
+def get_current_time_with_timezone():
+    random_timezone = random.choice(timezones)
+    tz = pytz.timezone(random_timezone)
+    return datetime.now(tz)
 
 
 async def send_messages(uri, client_id, token):
-    try:
-        async with websockets.connect(
-            uri + str(client_id) + f"?token={token}"
-        ) as websocket:
-            end_time = datetime.now() + timedelta(minutes=5)
-            while datetime.now() < end_time:
-                send_time = datetime.now(timezone.utc).isoformat()
-                message = {
-                    "type": "text",
-                    "send_time": send_time,
-                    "text": f"send message {send_time}",
-                }
-                print("send message", message)
-                message = json.dumps(message)
-                try:
-                    await websocket.send(message)
-                except websockets.exceptions.ConnectionClosedError as e:
-                    print(f"ConnectionClosedError: {e}")
-                    break
-                await asyncio.sleep(random.uniform(0.1, 60))
-    except Exception as error:
-        print("error when process websocket connection", error)
+    while True:
+        try:
+            async with websockets.connect(
+                uri + str(client_id) + f"?token={token}"
+            ) as websocket:
+                end_time = datetime.now() + timedelta(minutes=5)
+                while datetime.now() < end_time:
+                    send_time = get_current_time_with_timezone().isoformat()
+                    message = {
+                        "type": "text",
+                        "send_time": send_time,
+                        "text": f"send message {send_time}",
+                    }
+                    print("send message", message)
+                    message = json.dumps(message)
+                    try:
+                        await websocket.send(message)
+                    except websockets.exceptions.ConnectionClosedError as e:
+                        print(f"ConnectionClosedError: {e}")
+                        break
+                    await asyncio.sleep(random.uniform(0.1, 60))
+                break
+        except Exception as error:
+            print("error when process websocket connection", error)
+            print("retry after 5 seconds")
+            await asyncio.sleep(5)
+            continue
 
 
 def create_clients_token(user_name="lemanh", num_clients=NUMBER_CLIENTS):
