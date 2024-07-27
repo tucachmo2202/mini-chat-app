@@ -193,6 +193,8 @@ async def update_heartbeat(
 @app.get("/messages/{room_id}", response_model=List[Message])
 async def get_messages(
     room_id: str,
+    time_start: str = None,
+    time_end: str = None,
     page: int = 0,
     page_size: int = 10,
     user_infor: User = Depends(verify_user),
@@ -203,7 +205,37 @@ async def get_messages(
             status_code=status.HTTP_406_NOT_ACCEPTABLE,
             detail="Not allow to read message to this room",
         )
+    if time_start is not None:
+        try:
+            time_start = (
+                datetime.fromisoformat(time_start).astimezone(timezone.utc).timestamp()
+            )
+        except:  # noqa: E722
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="time_start not a valid datetime with iso format",
+            )
+    else:
+        time_start = "-inf"
+    if time_end is not None:
+        try:
+            time_end = (
+                datetime.fromisoformat(time_end).astimezone(timezone.utc).timestamp()
+            )
+        except:  # noqa: E722
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="time_end not a valid datetime with iso format",
+            )
+    else:
+        time_end = "inf"
     start_index = page * page_size
-    end_index = start_index + page_size - 1
-    messages = redis.zrange(f"messages:{room_id}", start_index, end_index, desc=True)
+    # end_index = start_index + page_size - 1
+    messages = redis.zrangebyscore(
+        f"messages:{room_id}",
+        min=time_start,
+        max=time_end,
+        start=start_index,
+        num=page_size,
+    )
     return [Message(**json.loads(msg)) for msg in messages]
