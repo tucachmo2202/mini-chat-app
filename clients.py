@@ -19,12 +19,12 @@ def get_current_time_with_timezone():
 
 
 async def send_messages(uri, client_id, token):
+    end_time = datetime.now() + timedelta(minutes=5)
     while True:
         try:
             async with websockets.connect(
                 uri + str(client_id) + f"?token={token}"
             ) as websocket:
-                end_time = datetime.now() + timedelta(minutes=5)
                 while datetime.now() < end_time:
                     send_time = get_current_time_with_timezone().isoformat()
                     message = {
